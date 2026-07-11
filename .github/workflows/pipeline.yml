@@ -1,0 +1,223 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [dev, test, main]
+  pull_request:
+    branches: [dev, test, main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Figures out which stage (development/testing/production) this run belongs
+  # to, based on the branch that was pushed to or the PR's base branch.
+  detect-branch:
+    name: Detect branch / stage
+    runs-on: ubuntu-latest
+    outputs:
+      branch: ${{ steps.detect.outputs.branch }}
+      stage: ${{ steps.detect.outputs.stage }}
+      label: ${{ steps.detect.outputs.label }}
+    steps:
+      - name: Determine target branch and stage
+        id: detect
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BRANCH="${{ github.base_ref }}"
+          else
+            BRANCH="${{ github.ref_name }}"
+          fi
+
+          case "$BRANCH" in
+            dev)
+              STAGE=development
+              ;;
+            test)
+              STAGE=testing
+              ;;
+            main)
+              STAGE=production
+              ;;
+            *)
+              echo "::error::Unrecognized branch '$BRANCH'"
+              exit 1
+              ;;
+          esac
+
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          echo "stage=$STAGE" >> "$GITHUB_OUTPUT"
+          echo "label=$STAGE" >> "$GITHUB_OUTPUT"
+          echo "Branch '$BRANCH' -> stage '$STAGE'"
+
+  # Notify as soon as code lands on one of the tracked branches.
+  notify-push:
+    name: Notify - code pushed
+    needs: detect-branch
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send push notification email
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          from: ${{ secrets.MAIL_USERNAME }}
+          to: ${{ secrets.NOTIFY_EMAIL }}
+          subject: "[${{ needs.detect-branch.outputs.label }}] Code pushed - ${{ github.repository }}"
+          body: |
+            Branch: ${{ needs.detect-branch.outputs.branch }}
+            Stage: ${{ needs.detect-branch.outputs.label }}
+            Commit: ${{ github.sha }}
+            Author: ${{ github.actor }}
+            Message: ${{ github.event.head_commit.message }}
+
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+  build-and-test:
+    name: Build and test
+    needs: detect-branch
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build
+        run: |
+          echo "Building for stage: ${{ needs.detect-branch.outputs.stage }}"
+          # Replace with real build steps, e.g. `npm ci && npm run build`
+
+      - name: Test
+        run: |
+          echo "Running tests for stage: ${{ needs.detect-branch.outputs.stage }}"
+          # Replace with real test steps, e.g. `npm test`
+
+  # Production only: seed a throwaway Postgres instance from db/init.sql,
+  # take a pg_dump backup, and publish it as a workflow artifact.
+  # Restricted to `push` because there's no reason to snapshot a database on
+  # a proposed (unmerged) PR change.
+  backup-production:
+    name: Postgres backup (production)
+    needs: [detect-branch, build-and-test]
+    if: needs.detect-branch.outputs.stage == 'production' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: appdb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    env:
+      PGHOST: localhost
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: appdb
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Wait for Postgres to be ready
+        run: |
+          for i in $(seq 1 10); do
+            pg_isready && break
+            echo "Waiting for postgres..."
+            sleep 3
+          done
+
+      - name: Seed database with sample data
+        run: psql -f db/init.sql
+
+      - name: Take pg_dump backup
+        run: |
+          mkdir -p backups
+          TIMESTAMP=$(date -u +"%Y%m%dT%H%M%SZ")
+          echo "TIMESTAMP=$TIMESTAMP" >> "$GITHUB_ENV"
+          pg_dump --format=custom --file="backups/appdb-${TIMESTAMP}.dump"
+
+      - name: Upload backup artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: postgres-backup-${{ env.TIMESTAMP }}
+          path: backups/*.dump
+          retention-days: 30
+
+      - name: Email backup completion
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          from: ${{ secrets.MAIL_USERNAME }}
+          to: ${{ secrets.NOTIFY_EMAIL }}
+          subject: "[production] Database backup completed - ${{ github.repository }}"
+          body: |
+            Production database backup completed successfully.
+
+            Backup file: appdb-${{ env.TIMESTAMP }}.dump
+            Commit: ${{ github.sha }}
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+  # Deploys using a GitHub Environment named after the stage, so
+  # "production" can carry required-reviewer protection rules configured in
+  # the repo settings. Restricted to `push` for the same reason as the
+  # backup job - only real commits on dev/test/main get deployed.
+  deploy:
+    name: Deploy (${{ needs.detect-branch.outputs.stage }})
+    needs: [detect-branch, build-and-test, backup-production]
+    if: |
+      always() &&
+      github.event_name == 'push' &&
+      needs.build-and-test.result == 'success' &&
+      (needs.backup-production.result == 'success' || needs.backup-production.result == 'skipped')
+    runs-on: ubuntu-latest
+    environment: ${{ needs.detect-branch.outputs.stage }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy
+        run: |
+          echo "Deploying branch '${{ needs.detect-branch.outputs.branch }}' to ${{ needs.detect-branch.outputs.stage }}"
+          # Replace with real deployment steps (e.g. ssh, cloud CLI, container push)
+
+  notify-deploy-complete:
+    name: Notify - deployment complete
+    needs: [detect-branch, deploy]
+    if: always() && needs.deploy.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send deployment completion email
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          from: ${{ secrets.MAIL_USERNAME }}
+          to: ${{ secrets.NOTIFY_EMAIL }}
+          subject: "[${{ needs.detect-branch.outputs.label }}] Deployment completed - ${{ github.repository }}"
+          body: |
+            Deployment to ${{ needs.detect-branch.outputs.label }} completed successfully.
+
+            Branch: ${{ needs.detect-branch.outputs.branch }}
+            Commit: ${{ github.sha }}
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
