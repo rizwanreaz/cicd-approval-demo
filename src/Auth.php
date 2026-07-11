@@ -16,6 +16,6 @@ final class Auth
             return ['id' => $user['id'], 'username' => $user['username']];
         }
 
-        return null;
+        return null:
     }
 }
