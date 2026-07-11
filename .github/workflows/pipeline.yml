@@ -62,76 +62,74 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build
-        run: |
-          echo "Building for stage: ${{ needs.detect-branch.outputs.stage }}"
-          # Replace with real build steps, e.g. `npm ci && npm run build`
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
 
-      - name: Test
-        run: |
-          echo "Running tests for stage: ${{ needs.detect-branch.outputs.stage }}"
-          # Replace with real test steps, e.g. `npm test`
+      - name: Lint PHP files
+        run: find public -name '*.php' -print0 | xargs -0 -n1 php -l
 
-  # Production only: seed a throwaway Postgres instance from db/init.sql,
-  # take a pg_dump backup, and publish it as a workflow artifact.
+  # Production only: seed a throwaway MySQL instance from db/init.sql, take
+  # a mysqldump backup, and commit it into db/backups/ in the repo.
   # Restricted to `push` because there's no reason to snapshot a database on
   # a proposed (unmerged) PR change.
   backup-production:
-    name: Postgres backup (production)
+    name: MySQL backup (production)
     needs: [detect-branch, build-and-test]
     if: needs.detect-branch.outputs.stage == 'production' && github.event_name == 'push'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     services:
-      postgres:
-        image: postgres:16
+      mysql:
+        image: mysql:8.0
         env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: appdb
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: logindemo
         ports:
-          - 5432:5432
+          - 3306:3306
         options: >-
-          --health-cmd="pg_isready -U postgres"
+          --health-cmd="mysqladmin ping -proot"
           --health-interval=10s
           --health-timeout=5s
-          --health-retries=5
+          --health-retries=10
     env:
-      PGHOST: localhost
-      PGPORT: 5432
-      PGUSER: postgres
-      PGPASSWORD: postgres
-      PGDATABASE: appdb
+      MYSQL_HOST: 127.0.0.1
+      MYSQL_DATABASE: logindemo
+      MYSQL_ROOT_PASSWORD: root
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install PostgreSQL client
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Install MySQL client
+        run: sudo apt-get update && sudo apt-get install -y mysql-client
 
-      - name: Wait for Postgres to be ready
+      - name: Wait for MySQL to be ready
         run: |
           for i in $(seq 1 10); do
-            pg_isready && break
-            echo "Waiting for postgres..."
+            mysqladmin ping -h "$MYSQL_HOST" -uroot -p"$MYSQL_ROOT_PASSWORD" --silent && break
+            echo "Waiting for mysql..."
             sleep 3
           done
 
       - name: Seed database with sample data
-        run: psql -f db/init.sql
+        run: mysql -h "$MYSQL_HOST" -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE" < db/init.sql
 
-      - name: Take pg_dump backup
+      - name: Take mysqldump backup
         run: |
-          mkdir -p backups
+          mkdir -p db/backups
           TIMESTAMP=$(date -u +"%Y%m%dT%H%M%SZ")
           echo "TIMESTAMP=$TIMESTAMP" >> "$GITHUB_ENV"
-          pg_dump --format=custom --file="backups/appdb-${TIMESTAMP}.dump"
+          mysqldump -h "$MYSQL_HOST" -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE" > "db/backups/${MYSQL_DATABASE}-${TIMESTAMP}.sql"
 
-      - name: Upload backup artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: postgres-backup-${{ env.TIMESTAMP }}
-          path: backups/*.dump
-          retention-days: 30
+      - name: Commit backup to repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "db/backups/${MYSQL_DATABASE}-${TIMESTAMP}.sql"
+          git commit -m "Add MySQL backup ${TIMESTAMP}"
+          git push origin HEAD:${{ github.ref_name }}
 
   # Deploys using a GitHub Environment named after the stage, so
   # "production" can carry required-reviewer protection rules configured in
