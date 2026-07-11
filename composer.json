@@ -1,0 +1,14 @@
+{
+    "name": "rizwanreaz/cicd-approval-demo",
+    "description": "CI/CD approval-gate demo: PHP/MySQL login app",
+    "type": "project",
+    "require-dev": {
+        "phpunit/phpunit": "^11.0"
+    },
+    "autoload": {
+        "classmap": ["src/"]
+    },
+    "autoload-dev": {
+        "classmap": ["tests/"]
+    }
+}
