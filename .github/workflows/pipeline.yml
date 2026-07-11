@@ -54,32 +54,6 @@ jobs:
           echo "label=$STAGE" >> "$GITHUB_OUTPUT"
           echo "Branch '$BRANCH' -> stage '$STAGE'"
 
-  # Notify as soon as code lands on one of the tracked branches.
-  notify-push:
-    name: Notify - code pushed
-    needs: detect-branch
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Send push notification email
-        uses: dawidd6/action-send-mail@v3
-        with:
-          server_address: smtp.gmail.com
-          server_port: 465
-          username: ${{ secrets.MAIL_USERNAME }}
-          password: ${{ secrets.MAIL_PASSWORD }}
-          from: ${{ secrets.MAIL_USERNAME }}
-          to: ${{ secrets.NOTIFY_EMAIL }}
-          subject: "[${{ needs.detect-branch.outputs.label }}] Code pushed - ${{ github.repository }}"
-          body: |
-            Branch: ${{ needs.detect-branch.outputs.branch }}
-            Stage: ${{ needs.detect-branch.outputs.label }}
-            Commit: ${{ github.sha }}
-            Author: ${{ github.actor }}
-            Message: ${{ github.event.head_commit.message }}
-
-            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
   build-and-test:
     name: Build and test
     needs: detect-branch
@@ -159,23 +133,6 @@ jobs:
           path: backups/*.dump
           retention-days: 30
 
-      - name: Email backup completion
-        uses: dawidd6/action-send-mail@v3
-        with:
-          server_address: smtp.gmail.com
-          server_port: 465
-          username: ${{ secrets.MAIL_USERNAME }}
-          password: ${{ secrets.MAIL_PASSWORD }}
-          from: ${{ secrets.MAIL_USERNAME }}
-          to: ${{ secrets.NOTIFY_EMAIL }}
-          subject: "[production] Database backup completed - ${{ github.repository }}"
-          body: |
-            Production database backup completed successfully.
-
-            Backup file: appdb-${{ env.TIMESTAMP }}.dump
-            Commit: ${{ github.sha }}
-            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
   # Deploys using a GitHub Environment named after the stage, so
   # "production" can carry required-reviewer protection rules configured in
   # the repo settings. Restricted to `push` for the same reason as the
@@ -198,26 +155,3 @@ jobs:
         run: |
           echo "Deploying branch '${{ needs.detect-branch.outputs.branch }}' to ${{ needs.detect-branch.outputs.stage }}"
           # Replace with real deployment steps (e.g. ssh, cloud CLI, container push)
-
-  notify-deploy-complete:
-    name: Notify - deployment complete
-    needs: [detect-branch, deploy]
-    if: always() && needs.deploy.result == 'success'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Send deployment completion email
-        uses: dawidd6/action-send-mail@v3
-        with:
-          server_address: smtp.gmail.com
-          server_port: 465
-          username: ${{ secrets.MAIL_USERNAME }}
-          password: ${{ secrets.MAIL_PASSWORD }}
-          from: ${{ secrets.MAIL_USERNAME }}
-          to: ${{ secrets.NOTIFY_EMAIL }}
-          subject: "[${{ needs.detect-branch.outputs.label }}] Deployment completed - ${{ github.repository }}"
-          body: |
-            Deployment to ${{ needs.detect-branch.outputs.label }} completed successfully.
-
-            Branch: ${{ needs.detect-branch.outputs.branch }}
-            Commit: ${{ github.sha }}
-            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
