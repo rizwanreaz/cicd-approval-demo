@@ -66,9 +66,17 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.2'
+          extensions: pdo_sqlite, pdo_mysql
+          coverage: none
 
       - name: Lint PHP files
-        run: find public -name '*.php' -print0 | xargs -0 -n1 php -l
+        run: find public src -name '*.php' -print0 | xargs -0 -n1 php -l
+
+      - name: Install Composer dependencies
+        uses: ramsey/composer-install@v3
+
+      - name: Run PHPUnit
+        run: vendor/bin/phpunit
 
   # Production only: seed a throwaway MySQL instance from db/init.sql, take
   # a mysqldump backup, and commit it into db/backups/ in the repo.
