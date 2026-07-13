@@ -1,0 +1,39 @@
+# Local dev stack: the app container + a MySQL 8 container seeded from
+# db/init.sql. Not used by CI (the pipeline uses its own throwaway MySQL
+# service containers) - this is purely for `docker compose up` on your
+# machine.
+services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: logindemo
+    ports:
+      - "3306:3306"
+    volumes:
+      # Files here run once, in name order, only when the data directory is
+      # empty (i.e. on first container start).
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    ports:
+      - "8000:80"
+    environment:
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      DB_NAME: logindemo
+      DB_USER: root
+      DB_PASSWORD: root
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+volumes:
+  mysql-data:

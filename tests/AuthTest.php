@@ -10,11 +10,16 @@ final class AuthTest extends TestCase
     {
         $this->pdo = new PDO('sqlite::memory:');
         $this->pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        $this->pdo->exec('CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT UNIQUE, password_hash TEXT)');
+        $this->pdo->exec(
+            'CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT UNIQUE, email TEXT UNIQUE, password_hash TEXT)'
+        );
 
-        $stmt = $this->pdo->prepare('INSERT INTO users (username, password_hash) VALUES (:username, :hash)');
+        $stmt = $this->pdo->prepare(
+            'INSERT INTO users (username, email, password_hash) VALUES (:username, :email, :hash)'
+        );
         $stmt->execute([
             'username' => 'admin',
+            'email' => 'admin@example.com',
             'hash' => password_hash('admin123', PASSWORD_BCRYPT),
         ]);
     }

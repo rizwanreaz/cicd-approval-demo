@@ -38,12 +38,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   <div class="page">
     <div class="card">
       <h1>Log in</h1>
-      <form method="post" action="login.php">
+      <form method="post" action="login.php" class="js-form">
         <label for="username">Username</label>
         <input type="text" id="username" name="username" autocomplete="username" required />
 
         <label for="password">Password</label>
-        <input type="password" id="password" name="password" autocomplete="current-password" required />
+        <div class="password-field">
+          <input type="password" id="password" name="password" autocomplete="current-password" required />
+          <button type="button" class="password-toggle">Show</button>
+        </div>
 
         <button type="submit">Log in</button>
       </form>
@@ -53,7 +56,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       <?php endif; ?>
 
       <p class="hint">Demo accounts: admin / admin123, demo / demo123</p>
+      <a class="nav-link" href="register.php">Need an account? Register</a>
     </div>
   </div>
+  <script src="assets/app.js"></script>
 </body>
 </html>

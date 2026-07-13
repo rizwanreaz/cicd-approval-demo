@@ -139,17 +139,67 @@ jobs:
           git commit -m "Add MySQL backup ${TIMESTAMP}"
           git push origin HEAD:${{ github.ref_name }}
 
+  # Builds the app image and pushes it to GHCR. Runs after build-and-test
+  # succeeds, only for pushes (not PRs) - a proposed change doesn't need a
+  # published image. All three branches get an image so dev/test/main each
+  # have something deployable; only `main` also gets the "latest" tag.
+  build-image:
+    name: Build and push image
+    needs: [detect-branch, build-and-test]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/${{ github.repository }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Compute image tags
+        id: tags
+        run: |
+          TAGS="${IMAGE}:${{ github.sha }}"
+          if [ "${{ needs.detect-branch.outputs.branch }}" = "main" ]; then
+            TAGS="${TAGS}
+          ${IMAGE}:latest"
+          fi
+          {
+            echo "tags<<EOF"
+            echo "$TAGS"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+
   # Deploys using a GitHub Environment named after the stage, so
   # "production" can carry required-reviewer protection rules configured in
   # the repo settings. Restricted to `push` for the same reason as the
   # backup job - only real commits on dev/test/main get deployed.
   deploy:
     name: Deploy (${{ needs.detect-branch.outputs.stage }})
-    needs: [detect-branch, build-and-test, backup-production]
+    needs: [detect-branch, build-and-test, backup-production, build-image]
     if: |
       always() &&
       github.event_name == 'push' &&
       needs.build-and-test.result == 'success' &&
+      needs.build-image.result == 'success' &&
       (needs.backup-production.result == 'success' || needs.backup-production.result == 'skipped')
     runs-on: ubuntu-latest
     environment: ${{ needs.detect-branch.outputs.stage }}
@@ -160,4 +210,5 @@ jobs:
       - name: Deploy
         run: |
           echo "Deploying branch '${{ needs.detect-branch.outputs.branch }}' to ${{ needs.detect-branch.outputs.stage }}"
+          echo "Image: ghcr.io/${{ github.repository }}:${{ github.sha }}"
           # Replace with real deployment steps (e.g. ssh, cloud CLI, container push)
