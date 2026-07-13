@@ -7,18 +7,18 @@ if (!isset($_SESSION['user_id'])) {
     exit;
 }
 
-$customers = [];
-$orders = [];
+$account = null;
+$users = [];
 $dbError = null;
 
 try {
     $pdo = db_connect();
-    $customers = $pdo->query('SELECT id, first_name, last_name, email FROM customers ORDER BY id')->fetchAll();
-    $orders = $pdo->query(
-        'SELECT orders.id, customers.first_name, customers.last_name, orders.order_date, orders.total_amount, orders.status
-         FROM orders JOIN customers ON customers.id = orders.customer_id
-         ORDER BY orders.order_date DESC'
-    )->fetchAll();
+
+    $stmt = $pdo->prepare('SELECT username, email, created_at FROM users WHERE id = :id');
+    $stmt->execute(['id' => $_SESSION['user_id']]);
+    $account = $stmt->fetch();
+
+    $users = $pdo->query('SELECT username, created_at FROM users ORDER BY created_at DESC')->fetchAll();
 } catch (PDOException $e) {
     $dbError = 'Could not load data from the database.';
 }
@@ -41,33 +41,26 @@ try {
       <?php if ($dbError): ?>
         <p class="error"><?= htmlspecialchars($dbError) ?></p>
       <?php else: ?>
-        <h2 class="section-title">Customers</h2>
-        <table>
-          <thead>
-            <tr><th>Name</th><th>Email</th></tr>
-          </thead>
-          <tbody>
-            <?php foreach ($customers as $customer): ?>
-              <tr>
-                <td><?= htmlspecialchars($customer['first_name'] . ' ' . $customer['last_name']) ?></td>
-                <td><?= htmlspecialchars($customer['email']) ?></td>
-              </tr>
-            <?php endforeach; ?>
-          </tbody>
-        </table>
+        <h2 class="section-title">Your account</h2>
+        <dl class="account-details">
+          <dt>Username</dt>
+          <dd><?= htmlspecialchars($account['username']) ?></dd>
+          <dt>Email</dt>
+          <dd><?= htmlspecialchars($account['email']) ?></dd>
+          <dt>Joined</dt>
+          <dd><?= htmlspecialchars($account['created_at']) ?></dd>
+        </dl>
 
-        <h2 class="section-title">Orders</h2>
+        <h2 class="section-title">Registered users</h2>
         <table>
           <thead>
-            <tr><th>Customer</th><th>Date</th><th>Total</th><th>Status</th></tr>
+            <tr><th>Username</th><th>Joined</th></tr>
           </thead>
           <tbody>
-            <?php foreach ($orders as $order): ?>
+            <?php foreach ($users as $user): ?>
               <tr>
-                <td><?= htmlspecialchars($order['first_name'] . ' ' . $order['last_name']) ?></td>
-                <td><?= htmlspecialchars($order['order_date']) ?></td>
-                <td>$<?= htmlspecialchars(number_format((float) $order['total_amount'], 2)) ?></td>
-                <td><?= htmlspecialchars($order['status']) ?></td>
+                <td><?= htmlspecialchars($user['username']) ?></td>
+                <td><?= htmlspecialchars($user['created_at']) ?></td>
               </tr>
             <?php endforeach; ?>
           </tbody>

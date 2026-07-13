@@ -1,0 +1,15 @@
+.git
+.github
+.claude
+vendor
+tests
+db/backups
+*.md
+.gitignore
+.dockerignore
+docker-compose.yml
+Dockerfile
+composer.json
+composer.lock
+phpunit.xml
+.phpunit.result.cache
