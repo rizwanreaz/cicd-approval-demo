@@ -16,10 +16,13 @@ flowchart TD
     C --> P{push event?}
     P -- yes --> Q[build-image<br/>build + push to GHCR]
     P -- no --> R[skip image build]
+    Q --> S{stage == production?}
+    S -- yes --> T[validate-k8s-deploy<br/>kind cluster, apply k8s/, smoke test]
+    S -- no --> U[skip k8s validation]
     E --> G[deploy]
     F --> G[deploy]
-    Q --> G[deploy]
-    R --> G[deploy]
+    T --> G[deploy]
+    U --> G[deploy]
     G --> H{{environment: stage name}}
     H -- development / testing --> I[deploys immediately]
     H -- production --> J[[waits for required reviewer approval]]
@@ -37,6 +40,11 @@ flowchart TD
   succeeds: builds the `Dockerfile` image and pushes it to
   `ghcr.io/<owner>/<repo>`, tagged with the commit SHA (always) and `latest`
   (main only).
+- **`validate-k8s-deploy`** (main/production only) spins up a throwaway
+  `kind` cluster on the runner, loads the image `build-image` just pushed,
+  applies the manifests in `k8s/`, and smoke-tests the app through the
+  Kubernetes Service — proving the app is genuinely deployable to
+  Kubernetes without needing a real cluster or cloud account.
 - **`deploy`** targets a GitHub Environment named after the stage
   (`development`, `testing`, `production`). The `production` environment has
   a required reviewer configured in repo settings, so every production
@@ -80,6 +88,41 @@ drop the MySQL data volume and start fresh next time).
 Every push to `dev`, `test`, or `main` also publishes an image to this
 repo's **GHCR package** (`ghcr.io/<owner>/<repo>`), tagged with the commit
 SHA (and `latest` for `main`) — see the `build-image` job above.
+
+## Run on Kubernetes locally (kind)
+
+Requires Docker, [`kind`](https://kind.sigs.k8s.io/), and `kubectl`. This
+mirrors exactly what the `validate-k8s-deploy` pipeline job does in CI.
+
+```bash
+docker build -t cicd-approval-demo:local .
+kind create cluster --name cicd-demo
+kind load docker-image cicd-approval-demo:local --name cicd-demo
+
+kubectl apply -f k8s/namespace.yaml
+kubectl create configmap mysql-init -n production \
+  --from-file=init.sql=db/init.sql --dry-run=client -o yaml | kubectl apply -f -
+kubectl apply -f k8s/mysql-secret.yaml
+kubectl apply -f k8s/mysql-deployment.yaml
+kubectl apply -f k8s/mysql-service.yaml
+sed 's|IMAGE_PLACEHOLDER|cicd-approval-demo:local|' k8s/app-deployment.yaml | kubectl apply -f -
+kubectl apply -f k8s/app-service.yaml
+
+kubectl -n production rollout status deployment/mysql
+kubectl -n production rollout status deployment/app
+
+kubectl -n production port-forward svc/app 8080:80
+```
+
+Then open **http://localhost:8080/login.php** — same demo accounts and
+register/login/dashboard flow as the Docker Compose setup. Tear down with
+`kind delete cluster --name cicd-demo`.
+
+The `k8s/` manifests: `namespace.yaml` (a `production` namespace),
+`mysql-deployment.yaml` + `mysql-service.yaml` (seeded via a ConfigMap
+generated from `db/init.sql`, so the schema is never duplicated), and
+`app-deployment.yaml` + `app-service.yaml` (the `IMAGE_PLACEHOLDER` is
+substituted with the real `ghcr.io` image + SHA tag at apply time).
 
 ## Running locally without Docker
 

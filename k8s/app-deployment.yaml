@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+  namespace: production
+  labels:
+    app: cicd-approval-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cicd-approval-demo
+  template:
+    metadata:
+      labels:
+        app: cicd-approval-demo
+    spec:
+      containers:
+        - name: app
+          # Substituted at apply time: the validate-k8s-deploy pipeline job
+          # replaces this with the ghcr.io image + SHA tag it just built (see
+          # k8s/README.md for the equivalent local-testing command).
+          image: IMAGE_PLACEHOLDER
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+          env:
+            - name: DB_HOST
+              value: mysql
+            - name: DB_PORT
+              value: "3306"
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-credentials
+                  key: MYSQL_DATABASE
+            - name: DB_USER
+              value: root
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-credentials
+                  key: MYSQL_ROOT_PASSWORD
+          readinessProbe:
+            httpGet:
+              path: /login.php
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /login.php
+              port: 80
+            initialDelaySeconds: 15
+            periodSeconds: 10

@@ -188,19 +188,81 @@ jobs:
           push: true
           tags: ${{ steps.tags.outputs.tags }}
 
+  # Production only: proves the app is actually Kubernetes-deployable by
+  # spinning up a throwaway kind (Kubernetes-in-Docker) cluster on the
+  # runner, loading the image build-image just pushed, and applying the
+  # manifests in k8s/ - all without needing a real cluster or cloud account.
+  validate-k8s-deploy:
+    name: Validate Kubernetes deploy (kind)
+    needs: [detect-branch, build-image]
+    if: needs.detect-branch.outputs.stage == 'production' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    env:
+      IMAGE: ghcr.io/${{ github.repository }}:${{ github.sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1.10.0
+        with:
+          cluster_name: cicd-demo
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull image and load it into kind
+        run: |
+          docker pull "$IMAGE"
+          kind load docker-image "$IMAGE" --name cicd-demo
+
+      - name: Apply manifests
+        run: |
+          kubectl apply -f k8s/namespace.yaml
+          kubectl create configmap mysql-init -n production \
+            --from-file=init.sql=db/init.sql --dry-run=client -o yaml | kubectl apply -f -
+          kubectl apply -f k8s/mysql-secret.yaml
+          kubectl apply -f k8s/mysql-deployment.yaml
+          kubectl apply -f k8s/mysql-service.yaml
+          sed "s|IMAGE_PLACEHOLDER|$IMAGE|" k8s/app-deployment.yaml | kubectl apply -f -
+          kubectl apply -f k8s/app-service.yaml
+
+      - name: Wait for rollout
+        run: |
+          kubectl -n production rollout status deployment/mysql --timeout=120s
+          kubectl -n production rollout status deployment/app --timeout=120s
+
+      - name: Smoke test through the Service
+        run: |
+          kubectl -n production port-forward svc/app 8080:80 &
+          for i in $(seq 1 10); do
+            curl -sf http://localhost:8080/login.php > /dev/null && break
+            sleep 2
+          done
+          curl -sf http://localhost:8080/login.php > /dev/null
+          echo "Login page reachable through the Kubernetes Service."
+
   # Deploys using a GitHub Environment named after the stage, so
   # "production" can carry required-reviewer protection rules configured in
   # the repo settings. Restricted to `push` for the same reason as the
   # backup job - only real commits on dev/test/main get deployed.
   deploy:
     name: Deploy (${{ needs.detect-branch.outputs.stage }})
-    needs: [detect-branch, build-and-test, backup-production, build-image]
+    needs: [detect-branch, build-and-test, backup-production, build-image, validate-k8s-deploy]
     if: |
       always() &&
       github.event_name == 'push' &&
       needs.build-and-test.result == 'success' &&
       needs.build-image.result == 'success' &&
-      (needs.backup-production.result == 'success' || needs.backup-production.result == 'skipped')
+      (needs.backup-production.result == 'success' || needs.backup-production.result == 'skipped') &&
+      (needs.validate-k8s-deploy.result == 'success' || needs.validate-k8s-deploy.result == 'skipped')
     runs-on: ubuntu-latest
     environment: ${{ needs.detect-branch.outputs.stage }}
     steps:
