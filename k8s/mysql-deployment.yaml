@@ -36,7 +36,11 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 5
             timeoutSeconds: 5
-            failureThreshold: 10
+            # First boot runs the initdb scripts (schema + seed data) before
+            # MySQL starts accepting connections, which can take a while on
+            # a loaded CI runner - give it up to ~3 minutes past the initial
+            # delay before giving up.
+            failureThreshold: 36
           livenessProbe:
             exec:
               command: ["sh", "-c", "mysqladmin ping -h localhost -uroot -p\"$MYSQL_ROOT_PASSWORD\""]
