@@ -30,22 +30,31 @@ spec:
               mountPath: /docker-entrypoint-initdb.d
             - name: data
               mountPath: /var/lib/mysql
+          # First boot runs the initdb scripts (schema + seed data), which
+          # can take a couple of minutes on a loaded CI runner. Without a
+          # startupProbe, livenessProbe's own short failure budget kills the
+          # container mid-boot and it restart-loops, never finishing initdb.
+          # startupProbe defers liveness/readiness until MySQL responds once,
+          # giving it up to ~5 minutes to come up before anything else acts.
+          startupProbe:
+            exec:
+              command: ["sh", "-c", "mysqladmin ping -h localhost -uroot -p\"$MYSQL_ROOT_PASSWORD\""]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 60
           readinessProbe:
             exec:
               command: ["sh", "-c", "mysqladmin ping -h localhost -uroot -p\"$MYSQL_ROOT_PASSWORD\""]
-            initialDelaySeconds: 10
             periodSeconds: 5
             timeoutSeconds: 5
-            # First boot runs the initdb scripts (schema + seed data) before
-            # MySQL starts accepting connections, which can take a while on
-            # a loaded CI runner - give it up to ~3 minutes past the initial
-            # delay before giving up.
-            failureThreshold: 36
+            failureThreshold: 3
           livenessProbe:
             exec:
               command: ["sh", "-c", "mysqladmin ping -h localhost -uroot -p\"$MYSQL_ROOT_PASSWORD\""]
-            initialDelaySeconds: 30
             periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
       volumes:
         - name: init-sql
           configMap:
