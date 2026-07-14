@@ -218,10 +218,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Pull image and load it into kind
+      - name: Pull images and load them into kind
         run: |
           docker pull "$IMAGE"
-          kind load docker-image "$IMAGE" --name cicd-demo
+          docker pull mysql:8.0
+          kind load docker-image "$IMAGE" mysql:8.0 --name cicd-demo
 
       - name: Apply manifests
         run: |
@@ -236,8 +237,20 @@ jobs:
 
       - name: Wait for rollout
         run: |
-          kubectl -n production rollout status deployment/mysql --timeout=120s
-          kubectl -n production rollout status deployment/app --timeout=120s
+          kubectl -n production rollout status deployment/mysql --timeout=240s || {
+            echo "--- mysql pod describe ---"
+            kubectl -n production describe pods -l app=mysql
+            echo "--- mysql pod logs ---"
+            kubectl -n production logs -l app=mysql --tail=200
+            exit 1
+          }
+          kubectl -n production rollout status deployment/app --timeout=120s || {
+            echo "--- app pod describe ---"
+            kubectl -n production describe pods -l app=cicd-approval-demo
+            echo "--- app pod logs ---"
+            kubectl -n production logs -l app=cicd-approval-demo --tail=200
+            exit 1
+          }
 
       - name: Smoke test through the Service
         run: |
