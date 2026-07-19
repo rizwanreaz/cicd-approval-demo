@@ -237,11 +237,13 @@ jobs:
 
       - name: Wait for rollout
         run: |
-          kubectl -n production rollout status deployment/mysql --timeout=330s || {
+          kubectl -n production rollout status deployment/mysql --timeout=120s || {
             echo "--- mysql pod describe ---"
             kubectl -n production describe pods -l app=mysql
-            echo "--- mysql pod logs ---"
+            echo "--- mysql pod logs (current) ---"
             kubectl -n production logs -l app=mysql --tail=200
+            echo "--- mysql pod logs (previous container, if any) ---"
+            kubectl -n production logs -l app=mysql --tail=200 --previous || true
             exit 1
           }
           kubectl -n production rollout status deployment/app --timeout=120s || {

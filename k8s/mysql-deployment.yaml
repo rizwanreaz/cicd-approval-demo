@@ -18,6 +18,18 @@ spec:
       containers:
         - name: mysql
           image: mysql:8.0
+          # MySQL 8 auto-generates self-signed SSL certs and RSA keys on
+          # first boot, drawing from /dev/random - this blocks for minutes
+          # in low-entropy environments like nested-virtualization CI
+          # runners (confirmed here: the first boot attempt sat for ~5
+          # minutes never accepting a connection, got killed, and the
+          # *second* attempt - reusing the now-initialized data dir - was
+          # ready in 1 second). This is an ephemeral, in-cluster-only demo
+          # DB with no need for TLS, so just skip that generation entirely.
+          args:
+            - --ssl=0
+            - --sha256_password_auto_generate_rsa_keys=OFF
+            - --caching_sha2_password_auto_generate_rsa_keys=OFF
           ports:
             - containerPort: 3306
           envFrom:
@@ -30,19 +42,13 @@ spec:
               mountPath: /docker-entrypoint-initdb.d
             - name: data
               mountPath: /var/lib/mysql
-          # First boot runs the initdb scripts (schema + seed data), which
-          # can take a couple of minutes on a loaded CI runner. Without a
-          # startupProbe, livenessProbe's own short failure budget kills the
-          # container mid-boot and it restart-loops, never finishing initdb.
-          # startupProbe defers liveness/readiness until MySQL responds once,
-          # giving it up to ~5 minutes to come up before anything else acts.
           startupProbe:
             exec:
               command: ["sh", "-c", "mysqladmin ping -h localhost -uroot -p\"$MYSQL_ROOT_PASSWORD\""]
             initialDelaySeconds: 5
             periodSeconds: 5
             timeoutSeconds: 5
-            failureThreshold: 60
+            failureThreshold: 30
           readinessProbe:
             exec:
               command: ["sh", "-c", "mysqladmin ping -h localhost -uroot -p\"$MYSQL_ROOT_PASSWORD\""]
