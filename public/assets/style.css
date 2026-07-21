@@ -88,6 +88,13 @@ button:hover {
   margin-top: 2rem;
 }
 
+.footer {
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-align: center;
+  margin-top: 1.5rem;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
