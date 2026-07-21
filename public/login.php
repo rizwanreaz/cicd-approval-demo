@@ -58,6 +58,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       <p class="hint">Demo accounts: admin / admin123, demo / demo123</p>
       <a class="nav-link" href="register.php">Need an account? Register</a>
     </div>
+    <p class="footer">Deployed via the CI/CD approval pipeline</p>
   </div>
   <script src="assets/app.js"></script>
 </body>
