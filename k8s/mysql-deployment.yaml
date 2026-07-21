@@ -30,6 +30,13 @@ spec:
             - --ssl=0
             - --sha256_password_auto_generate_rsa_keys=OFF
             - --caching_sha2_password_auto_generate_rsa_keys=OFF
+            # In one CI run the server ended up listening on the datadir's
+            # default socket (/var/lib/mysql/mysql.sock) instead of the one
+            # /etc/my.cnf configures (/var/run/mysqld/mysqld.sock), which the
+            # probes below assume via `-h localhost`. Pinning both sides to
+            # the same explicit path removes any chance of that mismatch,
+            # regardless of why the effective config diverged.
+            - --socket=/var/run/mysqld/mysqld.sock
           ports:
             - containerPort: 3306
           envFrom:
@@ -44,20 +51,20 @@ spec:
               mountPath: /var/lib/mysql
           startupProbe:
             exec:
-              command: ["sh", "-c", "mysqladmin ping -h localhost -uroot -p\"$MYSQL_ROOT_PASSWORD\""]
+              command: ["sh", "-c", "mysqladmin ping --socket=/var/run/mysqld/mysqld.sock -uroot -p\"$MYSQL_ROOT_PASSWORD\""]
             initialDelaySeconds: 5
             periodSeconds: 5
             timeoutSeconds: 5
             failureThreshold: 30
           readinessProbe:
             exec:
-              command: ["sh", "-c", "mysqladmin ping -h localhost -uroot -p\"$MYSQL_ROOT_PASSWORD\""]
+              command: ["sh", "-c", "mysqladmin ping --socket=/var/run/mysqld/mysqld.sock -uroot -p\"$MYSQL_ROOT_PASSWORD\""]
             periodSeconds: 5
             timeoutSeconds: 5
             failureThreshold: 3
           livenessProbe:
             exec:
-              command: ["sh", "-c", "mysqladmin ping -h localhost -uroot -p\"$MYSQL_ROOT_PASSWORD\""]
+              command: ["sh", "-c", "mysqladmin ping --socket=/var/run/mysqld/mysqld.sock -uroot -p\"$MYSQL_ROOT_PASSWORD\""]
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 6
