@@ -1,6 +1,6 @@
-# Local kind (Kubernetes-in-Docker) cluster, the Terraform equivalent of
-# `kind create cluster --name cicd-demo`. Runs entirely in Docker on this
-# machine: no cloud account, no cost.
+# Local kind (Kubernetes-in-Docker) cluster with one control plane node and
+# var.worker_count workers, replacing `kind create cluster --name cicd-demo`.
+# Runs entirely in Docker on this machine: no cloud account, no cost.
 resource "kind_cluster" "this" {
   name           = var.cluster_name
   node_image     = var.node_image
@@ -18,8 +18,11 @@ resource "kind_cluster" "this" {
       role = "control-plane"
     }
 
-    node {
-      role = "worker"
+    dynamic "node" {
+      for_each = range(var.worker_count)
+      content {
+        role = "worker"
+      }
     }
   }
 }

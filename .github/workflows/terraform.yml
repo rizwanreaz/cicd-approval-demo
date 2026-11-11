@@ -13,11 +13,16 @@ permissions:
 
 jobs:
   validate:
-    name: fmt / init / validate
+    name: fmt / init / validate (${{ matrix.dir }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # terraform: the kind cluster. terraform/app: the k8s/ manifests.
+        dir: [terraform, terraform/app]
     defaults:
       run:
-        working-directory: terraform
+        working-directory: ${{ matrix.dir }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -28,7 +33,7 @@ jobs:
           terraform_version: 1.17.1
 
       - name: terraform fmt
-        run: terraform fmt -check -recursive -diff
+        run: terraform fmt -check -diff
 
       - name: terraform init
         run: terraform init -input=false -backend=false
