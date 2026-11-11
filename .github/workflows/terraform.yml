@@ -1,0 +1,42 @@
+name: Terraform
+
+# Static checks only: never runs plan or apply, so it needs no Docker,
+# cluster or credentials.
+on:
+  pull_request:
+    paths:
+      - 'terraform/**'
+      - '.github/workflows/terraform.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: fmt / init / validate (${{ matrix.dir }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # terraform: the kind cluster. terraform/app: the k8s/ manifests.
+        dir: [terraform, terraform/app]
+    defaults:
+      run:
+        working-directory: ${{ matrix.dir }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.17.1
+
+      - name: terraform fmt
+        run: terraform fmt -check -diff
+
+      - name: terraform init
+        run: terraform init -input=false -backend=false
+
+      - name: terraform validate
+        run: terraform validate

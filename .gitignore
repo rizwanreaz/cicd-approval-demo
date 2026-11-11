@@ -1,3 +1,12 @@
 /vendor/
 .php-version
 .phpunit.result.cache
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+crash.log
+crash.*.log
+*.kubeconfig

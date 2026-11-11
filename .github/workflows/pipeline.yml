@@ -192,6 +192,8 @@ jobs:
   # spinning up a throwaway kind (Kubernetes-in-Docker) cluster on the
   # runner, loading the image build-image just pushed, and applying the
   # manifests in k8s/ - all without needing a real cluster or cloud account.
+  # Both the cluster (terraform/) and the k8s/ manifests (terraform/app/) are
+  # provisioned with Terraform, so CI and local runs use the same code.
   validate-k8s-deploy:
     name: Validate Kubernetes deploy (kind)
     needs: [detect-branch, build-image]
@@ -206,10 +208,28 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Create kind cluster
+      # Only the kind CLI, for `kind load` below; Terraform creates the
+      # cluster. v0.33.0 matches the kind embedded in the tehcyx/kind provider.
+      - name: Install kind CLI
         uses: helm/kind-action@v1.10.0
         with:
-          cluster_name: cicd-demo
+          version: v0.33.0
+          install_only: true
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.17.1
+          # The wrapper adds extra output to `terraform output -raw`.
+          terraform_wrapper: false
+
+      - name: Create kind cluster (Terraform)
+        working-directory: terraform
+        run: |
+          terraform init -input=false
+          terraform workspace select -or-create=true production
+          terraform apply -auto-approve -input=false -var-file=environments/production.tfvars
+          echo "KUBECONFIG=$(terraform output -raw kubeconfig_path)" >> "$GITHUB_ENV"
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -224,16 +244,13 @@ jobs:
           docker pull mysql:8.0
           kind load docker-image "$IMAGE" mysql:8.0 --name cicd-demo
 
-      - name: Apply manifests
+      - name: Apply manifests (Terraform)
+        working-directory: terraform/app
         run: |
-          kubectl apply -f k8s/namespace.yaml
-          kubectl create configmap mysql-init -n production \
-            --from-file=init.sql=db/init.sql --dry-run=client -o yaml | kubectl apply -f -
-          kubectl apply -f k8s/mysql-secret.yaml
-          kubectl apply -f k8s/mysql-deployment.yaml
-          kubectl apply -f k8s/mysql-service.yaml
-          sed "s|IMAGE_PLACEHOLDER|$IMAGE|" k8s/app-deployment.yaml | kubectl apply -f -
-          kubectl apply -f k8s/app-service.yaml
+          terraform init -input=false
+          terraform apply -auto-approve -input=false \
+            -var "kubeconfig_path=$KUBECONFIG" \
+            -var "app_image=$IMAGE"
 
       - name: Wait for rollout
         run: |
@@ -263,6 +280,13 @@ jobs:
           done
           curl -sf http://localhost:8080/login.php > /dev/null
           echo "Login page reachable through the Kubernetes Service."
+
+      # The runner is thrown away anyway, but tear the cluster down the same
+      # way it was created so the full Terraform lifecycle is exercised.
+      - name: Destroy kind cluster (Terraform)
+        if: always()
+        working-directory: terraform
+        run: terraform destroy -auto-approve -input=false -var-file=environments/production.tfvars
 
   # Deploys using a GitHub Environment named after the stage, so
   # "production" can carry required-reviewer protection rules configured in
